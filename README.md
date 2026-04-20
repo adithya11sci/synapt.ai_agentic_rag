@@ -1,49 +1,82 @@
 # Agentic RAG System for Financial Data Analysis
 
 ## Overview
-This project implements an intelligent Agentic Retrieval-Augmented Generation (RAG) system utilizing Large Language Models (LLMs) via the Groq API (`llama-3.1-8b-instant`). The system acts as a financial data analyst capable of robustly answering queries related to major IT companies (Infosys, TCS, Wipro) by autonomously selecting the appropriate tools for text extraction, tabular data querying, and live web search.
+This project implements an intelligent **Agentic Retrieval-Augmented Generation (RAG) system** utilizing Large Language Models (LLMs) via the Groq API (`llama-3.1-8b-instant`). The system acts as a financial data analyst capable of robustly answering queries related to major IT companies (Infosys, TCS, Wipro). It autonomously selects the appropriate tools for text extraction, tabular data querying, and live web search based on the user's intent.
 
-## Features
-- **Document RAG (Text Data):** Utilizes `SentenceTransformers` and `FAISS` to parse, index, and retrieve relevant qualitative financial information straight from PDF corporate reports.
-- **Tabular RAG (CSV Data):** Uses the pandas library to query and extract precise quantitative numbers (such as specific operating margins, revenues, and key financial metrics).
-- **Web Search (Live Data):** Integrates the Tavily API to fetch real-time data, handling dynamic queries such as fetching current stock prices.
-- **Agentic Routing & Reasoning:** The LLM autonomously determines the intent of the user's prompt and selects the best tool or combination of tools to formulate a highly accurate response.
-- **Strict Guardrails:** The agent is explicitly programmed through rigid system prompts to refuse to provide personal investment or financial advice.
+## System Architecture & Workflow
 
-## Environment Setup
-In order to run the workflow locally, you must create a `.env` file in the root directory (Note: `.env` is intentionally ignored by Git to prevent leaking secrets):
+The core of this system relies on a **ReAct (Reasoning + Acting)** style agent loop. Instead of manually specifying where to look for data, the AI dynamically decides based on the user prompt.
 
-```env
-GROQ_API_KEY=your_groq_api_key_here
-TAVILY_API_KEY=your_tavily_api_key_here
-GROQ_MODEL=llama-3.1-8b-instant
+1. **User Query:** The user submits a financial question (e.g., "What was the operating margin of Infosys?" or "What is TCS's stock price today?").
+2. **Agent Router (Groq LLM):** The LLM analyzes the query, consults its list of capabilities, and calls the appropriate system tool:
+   - `search_docs`: For qualitative questions (e.g., "What are the core pillars of Project Maximus?"). This queries the local vector database.
+   - `query_data`: For quantitative/tabular questions (e.g., "What was the operating margin for XYZ company in FY24?"). This queries structured CSVs.
+   - `web_search`: For real-time, dynamic market data (e.g., "What is the current stock price of TCS?"). This queries the live internet.
+3. **Tool Execution:** The Python backend intercepts the LLM's tool-call request, executes the corresponding local Python function, and passes the raw result back to the LLM context.
+4. **Final Synthesis:** The LLM reads the tool's raw output, extracts exactly the data needed, and synthesizes it into a natural, comprehensive human-readable response.
+5. **Strict Guardrails:** If a user asks for direct investment advice (e.g., "Should I buy Infosys stock right now?"), the system's strict system prompt engages and immediately refuses to provide financial advice, returning a safety warning instead.
+
+## Tech Stack (What it is using)
+
+- **LLM Engine:** [Groq API](https://groq.com/) using the `llama-3.1-8b-instant` model for lightning-fast inference and dynamic function calling.
+- **Vector Database:** [FAISS](https://github.com/facebookresearch/faiss) (Facebook AI Similarity Search) for high-performance localized similarity search of document chunks.
+- **Embeddings:** [SentenceTransformers](https://www.sbert.net/) (via HuggingFace) to convert raw text from PDFs into dense vector representations for similarity matching.
+- **Tabular Engine:** [Pandas](https://pandas.pydata.org/) for structuring and querying exact numerical financial data directly from CSV datasets.
+- **Web Search Integration:** [Tavily API](https://tavily.com/) optimized for AI agents to retrieve live market data, current stock prices, and recent news.
+
+## Repository Structure
+
+```text
+📦 agentic_rag
+├── 📂 data/
+│   ├── 📂 faiss_index/    # Compiled FAISS localized vector database
+│   ├── 📂 pdfs/           # Generated/Source qualitative financial reports
+│   └── 📜 financial_data.csv # Structured quantitative financial datasets
+├── 📂 scripts/
+│   ├── 📜 create_csv.py   # Generates the tabular financial datasets
+│   ├── 📜 index_docs.py   # Parses PDFs, chunks text, embeddings, and builds the FAISS index
+│   └── 📜 verify_tools.py # Validation script to test individual tool integrations
+├── 📂 src/
+│   ├── 📂 tools/
+│   │   ├── 📜 query_data.py # Logic for querying CSV tabular data via Pandas
+│   │   ├── 📜 search_docs.py# FAISS vector search logic for querying PDF text
+│   │   └── 📜 web_search.py # Tavily API integration for live web scraping
+│   └── 📜 agent.py        # Core LLM prompt, routing logic, execution loop, and tool registry
+├── 📜 test_quick.py       # Main entry point to interact with the finished Agentic RAG
+├── 📜 requirements.txt    # Project dependencies
+└── 📜 .env                # Local secrets (API keys) - Safely ignored by Git
 ```
 
-## How to Run
-1. **Install Dependencies:**
-   Ensure you have installed all required dependencies (`faiss-cpu`, `sentence-transformers`, `pandas`, `reportlab`, `python-dotenv`). You can often do this via:
+## Setup & Installation
+
+1. **Install dependencies:**
+   Make sure you are in the project folder and run:
    ```bash
    pip install -r requirements.txt
    ```
 
-2. **Initialize Data:** 
-   Run the setup scripts to generate the initial PDFs, construct the CSVs, and build the FAISS vector database indices:
+2. **Environment Variables:**
+   Create a `.env` file in the root directory and populate your API keys. *Note: `.env` is ignored by `.gitignore` to prevent leaking secrets to GitHub.*
+   ```env
+   GROQ_API_KEY=your_groq_api_key_here
+   TAVILY_API_KEY=your_tavily_api_key_here
+   GROQ_MODEL=llama-3.1-8b-instant
+   ```
+
+## How to Run
+
+1. **Initialize the Data & Vector Store:**
+   Generate the PDF/CSV data and build the FAISS embedding index locally by running the setup scripts:
    ```bash
    python scripts/create_csv.py
    python scripts/index_docs.py
    ```
 
-3. **Execute Queries:**
-   Use the provided testing script to run the complete agent workflow and evaluate the responses:
+2. **Test the Application Workflow:**
+   Run the quick test script to see the agent dynamically route questions through the Document RAG, Tabular RAG, and Web Search pipelines:
    ```bash
    python -X utf8 test_quick.py
    ```
 
-## Repository Structure
-- `data/`: Contains the raw generated PDFs, structured CSV data, and the FAISS vector index files.
-- `scripts/`: Initialization and setup scripts for building the document indices and validating the tools.
-- `src/`: Core logic including the `agent.py` router and `tools/` directory containing the modular toolsets (`search_docs`, `query_data`, `web_search`).
-- `test_quick.py`: The main entry point script to validate the prompts and interact with the RAG agent in action.
-
 ## Disclaimer
-_This project is created for demonstration and educational purposes as an internship assignment evaluation. The AI model output does not constitute legitimate professional financial advice._
+*This project is created for demonstration and educational purposes as an internship assignment evaluation. The AI model output does not constitute legitimate professional financial advice.*
