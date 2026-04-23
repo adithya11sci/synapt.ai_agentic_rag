@@ -1,11 +1,15 @@
 import os
+import logging
 import threading
 from tavily import TavilyClient
+
+logger = logging.getLogger("agentic_rag.web_search")
 
 def web_search(query):
     """Retrieve live facts like stock prices, recent news, or Q1 FY25 results."""
     api_key = os.environ.get("TAVILY_API_KEY")
     if not api_key:
+        logger.warning("Tavily API key missing, web search unavailable")
         return "Web search failed: Tavily API key missing. Use search_docs or query_data."
         
     client = TavilyClient(api_key=api_key)

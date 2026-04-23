@@ -2,6 +2,7 @@ import pandas as pd
 from pathlib import Path
 
 def create_csv():
+    """Creates the structured financial CSV with hardcoded FY21-FY24 data."""
     cols = ['company', 'year', 'revenue_crore', 'operating_margin_pct', 'net_profit_crore', 'eps_inr', 'headcount']
     data = [
         ['Infosys', 'FY21', 100472, 24.5, 19351, 46.71, 259619],
@@ -22,7 +23,7 @@ def create_csv():
     out_dir = Path("data")
     out_dir.mkdir(parents=True, exist_ok=True)
     df.to_csv(out_dir / "financials.csv", index=False)
-    print("Created data/financials.csv")
+    print(f"Created data/financials.csv ({len(df)} rows)")
 
 if __name__ == "__main__":
     create_csv()

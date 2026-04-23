@@ -1,20 +1,35 @@
+import logging
 import pandas as pd
 from pathlib import Path
 
+logger = logging.getLogger("agentic_rag.query_data")
+
+# ── Global cache ──
+_df_cache = None
+
+def _get_df():
+    """Lazy-load and cache the financial CSV."""
+    global _df_cache
+    if _df_cache is None:
+        csv_path = Path("data/financials.csv")
+        if not csv_path.exists():
+            return None
+        logger.info("Loading financials.csv (first call)...")
+        _df_cache = pd.read_csv(csv_path)
+    return _df_cache.copy()
+
 def query_data(question):
     """Query structured financial data (revenue, margin, profit, EPS, headcount)."""
-    csv_path = Path("data/financials.csv")
-    if not csv_path.exists():
-        return "Error: financials.csv not found."
-        
     try:
-        df = pd.read_csv(csv_path)
+        df = _get_df()
+        if df is None:
+            return "Error: financials.csv not found."
         q = question.lower()
         
         companies = [c for c in ["infosys", "tcs", "wipro"] if c in q]
         years = [y for y in ["fy21", "fy22", "fy23", "fy24", "2021", "2022", "2023", "2024"] if y in q]
         # Normalize year entries
-        years = [y.replace("20", "fy") if y.startswith("20") else y for y in years]
+        years = ["fy" + y[2:] if y.startswith("20") else y for y in years]
         
         # Filter dataframe based on detected entities
         filtered_df = df

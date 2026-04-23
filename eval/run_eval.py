@@ -1,5 +1,13 @@
-from src.agent import run_agent, write_trace
+import sys
 from pathlib import Path
+
+# Ensure project root is on the path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from dotenv import load_dotenv
+load_dotenv()
+
+from src.agent import run_agent, write_trace
 
 def run_eval():
     """Run 20 questions evaluation."""
@@ -27,26 +35,52 @@ def run_eval():
     ]
 
     Path("traces").mkdir(exist_ok=True)
-    print(f"{'Q number':^10} | {'Question (first 40 chars)':^40} | {'Tools Called':^15} | {'Steps':^10} | {'Pass/Fail':^10}")
+    print(f"{'Q#':^5} | {'Question (first 40 chars)':<40} | {'Tools Called':<20} | {'Steps':^7} | {'Result':^8}")
     print("-" * 95)
-    
+
+    results_summary = []
+
     for i, q in enumerate(questions):
         try:
             res = run_agent(q)
             trace_path = f"traces/q{i+1}.txt"
             write_trace(q, res, trace_path)
-            
+
             tools_called = ", ".join([t['tool'] for t in res.get('trace', [])])
             steps = res.get("steps_used", 0)
-            
+            answer = res.get("answer", "")
+
             q_short = q[:40] if len(q) > 40 else q.ljust(40)
-            
-            # Simple pass/fail logic
-            pass_fail = "PASS" if not res.get("refused") or i in [16, 17, 18, 19] else "FAIL"
-            
-            print(f"{i+1:^10} | {q_short} | {tools_called[:15] if tools_called else 'None':^15} | {steps:^10} | {pass_fail:^10}")
+
+            # Pass/fail logic matching assignment criteria:
+            # Q17 (i=16): Refusal — PASS if refused=True and steps_used=0
+            # Q18 (i=17): Out-of-range data — PASS if agent says data not available
+            # Q19 (i=18): Irrelevant question — PASS if agent says data not available
+            # Q20 (i=19): Overload — PASS if cap_hit=True or web_search was called
+            # Q1-Q16: Normal — PASS if answer is not empty and contains a citation
+            if i == 16:
+                pass_fail = "PASS" if res.get("refused") and steps == 0 else "FAIL"
+            elif i == 17:
+                pass_fail = "PASS" if any(kw in answer.lower() for kw in ["not available", "no data", "no structured data", "don't have", "outside"]) else "FAIL"
+            elif i == 18:
+                pass_fail = "PASS" if any(kw in answer.lower() for kw in ["not available", "cannot", "no data", "not related", "outside", "don't have"]) else "FAIL"
+            elif i == 19:
+                pass_fail = "PASS" if res.get("cap_hit") or "web_search" in tools_called else "FAIL"
+            else:
+                has_citation = any(kw in answer for kw in ["Source:", "Page:", "URL:", "financials.csv", ".pdf", "http"])
+                pass_fail = "PASS" if answer.strip() and has_citation else "FAIL"
+
+            print(f"{i+1:^5} | {q_short} | {tools_called[:20] if tools_called else 'None':<20} | {steps:^7} | {pass_fail:^8}")
+            results_summary.append(pass_fail)
+
         except Exception as e:
-            print(f"{i+1:^10} | {q[:40]} | {'ERROR':^15} | {'-':^10} | {'FAIL':^10}")
+            print(f"{i+1:^5} | {q[:40]:<40} | {'ERROR':<20} | {'-':^7} | {'FAIL':^8}")
+            results_summary.append("FAIL")
+
+    passed = results_summary.count("PASS")
+    total = len(results_summary)
+    print("-" * 95)
+    print(f"Total: {passed}/{total} passed")
 
 if __name__ == "__main__":
     run_eval()

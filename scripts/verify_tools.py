@@ -1,3 +1,12 @@
+import sys
+from pathlib import Path
+
+# Ensure project root is on the path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from dotenv import load_dotenv
+load_dotenv()
+
 from src.tools.search_docs import search_docs
 from src.tools.query_data import query_data
 from src.tools.web_search import web_search
@@ -13,7 +22,8 @@ def main():
         print("PASS")
         passed += 1
     else:
-        print("FAIL: Expected '[1]' and 'Page:' in result")
+        print(f"FAIL: Expected '[1]' and 'Page:' in result")
+        print(f"  Got: {str(res1)[:200]}")
 
     print("\nTest 2 — query_data:")
     res2 = query_data("What was Infosys operating margin in FY24?")
@@ -21,7 +31,8 @@ def main():
         print("PASS")
         passed += 1
     else:
-        print("FAIL: Expected '20.7' in result")
+        print(f"FAIL: Expected '20.7' in result")
+        print(f"  Got: {str(res2)[:200]}")
 
     print("\nTest 3 — web_search:")
     res3 = web_search("Infosys stock price today")
@@ -29,7 +40,8 @@ def main():
         print("PASS")
         passed += 1
     else:
-        print("FAIL: Expected 'URL:' in result")
+        print(f"FAIL: Expected 'URL:' in result")
+        print(f"  Got: {str(res3)[:200]}")
 
     print("\nTest 4 — refusal:")
     res4 = check_refusal("Should I buy Infosys stock?")
