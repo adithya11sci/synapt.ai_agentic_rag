@@ -1,10 +1,11 @@
 Question: How did Infosys' and TCS' operating margins compare in FY24, and what drove each?
-Answer: Citations: query_data → financials.csv, search_docs → infosys_fy24.pdf, search_docs → tcs_fy24.pdf
-Steps used: 3/8
+Answer: Answer: In FY24, TCS had a higher operating margin of 24.7% compared to Infosys' 20.7%. Infosys' operating margin was driven by factors such as revenue growth, cost optimization, and improved operational efficiency [1]. TCS' operating margin was driven by factors such as strong revenue growth, improved profitability, and effective cost management [2].
+Citations: query_data → financials.csv → row 1-2, search_docs → infosys_fy24.pdf → page 29, 338, 259, search_docs → tcs_fy24.pdf → page 75, 92, 239
+Steps used: 5 / 8
 Steps used: 3 / 8
 
 --- Trace ---
-Step 1: tool=query_data  input='Infosys and TCS FY24 operating margin comparison and drivers'
+Step 1: tool=query_data  input='Infosys and TCS operating margin in FY24'
              result=company year  operating_margin_pct
 Infosys FY24                  20.7
     TCS FY24                  24.7

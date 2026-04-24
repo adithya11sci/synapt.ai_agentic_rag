@@ -1,6 +1,7 @@
 import sys
 import json
 import os
+import re
 import time
 import logging
 from groq import Groq
@@ -24,8 +25,66 @@ def _validate_env():
         logger.warning("TAVILY_API_KEY not set — web_search tool will be unavailable.")
 
 
+def _parse_failed_generation(failed_gen: str):
+    """
+    Parse the malformed <function=name {...}></function> format that
+    LLaMA-3.3-70B sometimes emits, returning (func_name, args_dict) or None.
+    """
+    # Pattern: <function=TOOL_NAME {JSON}>\n or <function=TOOL_NAME {JSON}</function>
+    pattern = r'<function=([\w_]+)\s*({.*?})'
+    match = re.search(pattern, failed_gen, re.DOTALL)
+    if match:
+        func_name = match.group(1)
+        try:
+            args = json.loads(match.group(2))
+            return func_name, args
+        except json.JSONDecodeError:
+            pass
+    return None
+
+
+def _make_synthetic_tool_call_response(func_name: str, args: dict):
+    """
+    Build a minimal object that mimics a Groq ChatCompletion response
+    containing a single tool call, so the agent loop can dispatch it normally.
+    """
+    import uuid
+
+    class _FunctionCall:
+        def __init__(self, name, arguments):
+            self.name = name
+            self.arguments = json.dumps(arguments)
+
+    class _ToolCall:
+        def __init__(self, name, args):
+            self.id = f"call_{uuid.uuid4().hex[:8]}"
+            self.type = "function"
+            self.function = _FunctionCall(name, args)
+
+    class _Message:
+        def __init__(self, tool_call):
+            self.content = None
+            self.tool_calls = [tool_call]
+
+    class _Choice:
+        def __init__(self, message):
+            self.message = message
+            self.finish_reason = "tool_calls"
+
+    class _Response:
+        def __init__(self, choice):
+            self.choices = [choice]
+
+    tc = _ToolCall(func_name, args)
+    return _Response(_Choice(_Message(tc)))
+
+
 def _call_llm(client, model, messages, tools=None, max_retries=3):
-    """Call Groq API with exponential backoff retry."""
+    """Call Groq API with exponential backoff retry.
+    
+    Handles the tool_use_failed 400 error that LLaMA-3.3-70B emits when it
+    generates <function=name {...}> syntax instead of proper JSON tool calls.
+    """
     for attempt in range(max_retries):
         try:
             kwargs = dict(model=model, messages=messages, temperature=0.0)
@@ -34,6 +93,32 @@ def _call_llm(client, model, messages, tools=None, max_retries=3):
                 kwargs["tool_choice"] = "auto"
             return client.chat.completions.create(**kwargs)
         except Exception as e:
+            err_str = str(e)
+            # ── LLaMA tool_use_failed: parse the malformed generation ──
+            if "tool_use_failed" in err_str or "Failed to call a function" in err_str:
+                failed_gen = ""
+                try:
+                    # Groq wraps the raw error body; extract failed_generation
+                    body = e.response.json() if hasattr(e, "response") else {}
+                    failed_gen = body.get("error", {}).get("failed_generation", "")
+                except Exception:
+                    pass
+                # Also try extracting from the string representation
+                if not failed_gen:
+                    fg_match = re.search(r"'failed_generation':\s*'(.*?)'", err_str, re.DOTALL)
+                    if fg_match:
+                        failed_gen = fg_match.group(1)
+                if failed_gen:
+                    parsed = _parse_failed_generation(failed_gen)
+                    if parsed:
+                        func_name, args = parsed
+                        logger.warning(
+                            f"tool_use_failed recovered: synthesising tool call "
+                            f"{func_name}({list(args.keys())})"
+                        )
+                        return _make_synthetic_tool_call_response(func_name, args)
+                logger.error(f"tool_use_failed and could not parse failed_generation: {failed_gen[:200]}")
+            # ── Generic retry with backoff ──
             if attempt < max_retries - 1:
                 wait = 2 ** attempt
                 logger.warning(f"Groq API call failed (attempt {attempt+1}): {e}. Retrying in {wait}s...")
@@ -53,7 +138,7 @@ def run_agent(question):
         return {"answer": refusal_msg, "steps_used": 0, "trace": [], "refused": True}
 
     client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-    model = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+    model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
     logger.info(f"Agent starting | model={model} | question={question[:80]}")
 
     tools = [
@@ -149,7 +234,11 @@ def run_agent(question):
         "OUTPUT FORMAT:\n"
         "Answer: [your answer with inline citations]\n"
         "Citations: [tool used → source → page or row or url]\n"
-        "Steps used: [N] / 8"
+        "Steps used: [N] / 8\n\n"
+        "CRITICAL: You MUST use the native tool-calling mechanism provided. "
+        "NEVER write <function=name {...}> style tags. "
+        "NEVER write function calls in plain text. "
+        "Use ONLY the structured tool_calls format supplied by the API."
     )
 
     messages = [
@@ -172,7 +261,22 @@ def run_agent(question):
         msg = response.choices[0].message
 
         if msg.tool_calls:
-            messages.append(msg)
+            # We must serialize the message correctly for groq
+            messages.append({
+                "role": "assistant",
+                "content": msg.content or "",
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": tc.type,
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    }
+                    for tc in msg.tool_calls
+                ]
+            })
 
             for tool_call in msg.tool_calls:
                 steps_used += 1

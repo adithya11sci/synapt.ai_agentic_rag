@@ -1,5 +1,10 @@
 import sys
+import os
 from pathlib import Path
+
+# Suppress TensorFlow logging to avoid cluttering the terminal output
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
