@@ -1,0 +1,5 @@
+Question: what is the name of the monkey in the movie 'the monkey king'?
+Answer: I'm a financial research agent focused on Infosys, TCS, and Wipro, and I'm not able to answer questions that are outside of my domain. I can provide information on the financial performance and strategies of these companies, but I don't have knowledge about movies or general trivia. If you have a question about Infosys, TCS, or Wipro, I'd be happy to try and help.
+Steps used: 0 / 8
+
+--- Trace ---

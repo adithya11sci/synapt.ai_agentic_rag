@@ -1,0 +1,21 @@
+Question: How did Infosys' and TCS' operating margins compare in FY24, and what drove each?
+Answer: Citations: query_data → financials.csv, search_docs → infosys_fy24.pdf, search_docs → tcs_fy24.pdf
+Steps used: 3/8
+Steps used: 3 / 8
+
+--- Trace ---
+Step 1: tool=query_data  input='Infosys and TCS FY24 operating margin comparison and drivers'
+             result=company year  operating_margin_pct
+Infosys FY24                  20.7
+    TCS FY24                  24.7
+Source: financials.csv
+Step 2: tool=search_docs  input='Infosys FY24 operating margin drivers'
+             result=[1] Source: infosys_fy24.pdf | Page: 29 | Section: STATUTORY REPORTS
+    Section: STATUTORY REPORTS Infosys Integrated Annual Report 2023-24 56 Dear Members, The Board of Directors hereby submits the report of the business and operations of your Company (“the Company” or “Infosys”), along with the audited financial statements, for the financial year ended March 31, 2024....
+[2] Source: infosys_fy24.pdf | Page: 338 | Section: DIN: 01876159
+    Section: DIN: 01876159 Infosys Integrated Annual Repo
+Step 3: tool=search_docs  input='TCS FY24 operating margin drivers'
+             result=[1] Source: tcs_fy24.pdf | Page: 75 | Section: EUR 11.1 89.80 84.01 6.9
+    Section: EUR 11.1 89.80 84.01 6.9 75Management Discussion and Analysis Financial Performance Overview The discussions in this section relate to the consolidated, Rupee-denominated financial results pertaining to the year that ended March 31, 2024. The financial statements of Tata Consultancy Service...
+[2] Source: tcs_fy24.pdf | Page: 92 | Section: EBIT % 9.4 7.6 11.9 14.1 10.1 7.0 3.0 22.8 0.6 5.3 13.7 6.3 (4.7)
+    Sec
