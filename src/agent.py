@@ -145,7 +145,7 @@ def run_agent(question):
         "3. For questions needing a number AND explanation: call query_data "
         "first, then search_docs.\n"
         "4. Hard cap: 8 tool calls maximum per question.\n"
-        "5. For trivial questions (math, basic definitions): answer directly.\n\n"
+        "5. If the user asks an out-of-domain question (e.g., general trivia, recipes, non-financial topics), politely refuse to answer and state that you are a financial research agent focused on Infosys, TCS, and Wipro.\n\n"
         "OUTPUT FORMAT:\n"
         "Answer: [your answer with inline citations]\n"
         "Citations: [tool used → source → page or row or url]\n"

@@ -1,110 +1,108 @@
-# Design Document — Agentic RAG System
+# 🏗️ Design Document — Agentic RAG System
 
-## 1. Overview
+## 1. 🌟 Overview
 
-This system is a financial research agent that answers questions about Infosys, TCS, and Wipro using three data sources: annual report PDFs (unstructured), a financial metrics CSV (structured), and live web search. The agent autonomously selects which tool to call, calls multiple tools when needed, and composes a cited answer.
+This system is a specialized financial research agent designed to answer complex queries about Infosys, TCS, and Wipro. It dynamically synthesizes information across three distinct data modalities:
+* **Unstructured Data:** Annual report PDFs (via Vector DB)
+* **Structured Data:** Financial metrics CSV (via Pandas logic)
+* **Real-time Data:** Live web search (via Tavily API)
 
-## 2. Agent Loop — Step by Step
+The agent autonomously selects which tool to invoke, calls multiple tools sequentially when required, and composes a highly accurate, cited final answer.
 
-The core is a plain Python `while` loop in `src/agent.py` (`run_agent()` function, under 100 lines).
+## 2. 🔄 Agent Loop — Step by Step
 
-```
+The core architecture avoids heavy orchestration frameworks in favor of a highly deterministic, fully transparent Python `while` loop housed in `src/agent.py` (`run_agent()` function).
+
+```text
 User Question
      │
      ▼
-[1] check_refusal() ── triggers? ──→ Return refusal (0 API calls)
+[1] check_refusal() ── triggers? ──→ Return refusal (0 API calls/tokens)
      │ no
      ▼
-[2] Build messages: system prompt + user question
+[2] Build messages: Strict System Prompt + User Question
      │
      ▼
-┌──────────────────────────────────────────┐
-│ while steps_used < 8:                    │
-│                                          │
-│  [3] Call Groq LLM with messages + tools │
-│       │                                  │
-│       ├─ No tool calls? → Return answer  │
-│       │                                  │
-│       └─ Has tool_calls:                 │
-│           [4] For each tool_call:        │
-│               steps_used += 1            │
-│               │                          │
-│               ├─ steps >= 8? → Hard cap  │
-│               │   Return partial answer  │
-│               │                          │
-│               └─ Execute tool function   │
-│                   Append result to msgs  │
-│                   Log to trace           │
-│                                          │
-│  [5] Loop back to step 3                 │
-└──────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────┐
+│ while steps_used < 8:                                  │
+│                                                        │
+│  [3] Call Groq LLM with chat history + tool schemas    │
+│       │                                                │
+│       ├─ No tool calls? → Return final text answer     │
+│       │                                                │
+│       └─ Has tool_calls:                               │
+│           [4] For each tool_call:                      │
+│               steps_used += 1                          │
+│               │                                        │
+│               ├─ steps >= 8? → Abort: Hit Hard Cap     │
+│               │   Return partial summarized answer     │
+│               │                                        │
+│               └─ Execute Python Tool Function          │
+│                   Append output to message history     │
+│                   Log telemetry to trace files         │
+│                                                        │
+│  [5] Loop back to step 3 (LLM reviews new tool data)   │
+└────────────────────────────────────────────────────────┘
 ```
 
-### Key Design Decisions
+### 🔑 Key Design Decisions
 
-1. **Refusal check before any API call**: Investment advice triggers are caught by substring matching in `check_refusal()` before the LLM is ever called. This costs zero tokens and guarantees no tool is invoked.
+1. **Pre-LLM Refusal Check**: Investment advice triggers are caught explicitly by substring matching in `check_refusal()` *before* the LLM is ever called. This guarantees absolute compliance and zero token usage for rejected queries.
+2. **Autonomous LLM Routing**: The system prompt provides explicit instructions on tool boundaries. The agent loop does not hardcode `if/else` routing logic; the LLM handles it dynamically.
+3. **Strict Iteration Caps**: The `steps_used` counter forcefully terminates infinite loops at 8 executions, saving exponential API cost explosions.
+4. **Resilient Error Isolation**: Each tool call is strictly wrapped in `try/except` blocks. If a tool crashes (e.g., Network Timeout), the exception is converted to a string and fed *back* to the LLM, allowing the AI to naturally apologize or pick a fallback tool.
 
-2. **Tool choice is delegated to the LLM**: The system prompt and tool descriptions tell the LLM when to use each tool. The agent loop does not hardcode routing logic.
+## 3. 🛠️ Tool Schemas
 
-3. **Hard cap at 8 tool calls**: The `steps_used` counter increments per tool call (not per LLM call). When the cap is hit, we inject a "hard cap reached" message and make one final LLM call to compose a summary of whatever data was collected.
+### 📄 search_docs
 
-4. **Error isolation**: Each tool call is wrapped in try/except. Tool failures produce an error string that goes back to the LLM, which can then decide to try a different tool or report the issue.
-
-## 3. Tool Schemas
-
-### search_docs
-
-| Field | Value |
+| Field | Description / Value |
 |-------|-------|
 | **Name** | `search_docs` |
 | **Purpose** | Semantic search over FY24 annual report PDFs |
 | **Input** | `query` (string) — natural language search query |
 | **Output** | Top-3 text chunks with source filename, page number, and section |
-| **When to use** | Qualitative questions: strategy, MD&A commentary, CEO statements, risk factors, ESG, large deals |
-| **When NOT to use** | Specific financial numbers (use `query_data`), live/recent data (use `web_search`) |
+| **When to use** | Qualitative questions: corporate strategy, MD&A commentary, CEO statements, risk factors, ESG goals |
+| **When NOT to use**| Specific financial numbers (use `query_data`), live/recent data (use `web_search`) |
 
-**Implementation**: Encodes the query with `all-mpnet-base-v2`, searches a FAISS `IndexFlatL2` index of 1,803 chunks (450 words each, 50-word overlap), and returns the top-3 results with metadata.
+* **Implementation Details**: Uses `SentenceTransformers` (`all-mpnet-base-v2`) to encode queries, searching a persistent local `FAISS` index containing 1,803 pre-embedded text chunks (chunked at 450 words with a 50-word sliding overlap).
 
-### query_data
+### 📊 query_data
 
-| Field | Value |
+| Field | Description / Value |
 |-------|-------|
 | **Name** | `query_data` |
-| **Purpose** | Query structured financial CSV |
+| **Purpose** | Query structured, tabular financial CSV database |
 | **Input** | `question` (string) — financial data query |
-| **Output** | Scalar value or table from `financials.csv` with source citation |
-| **When to use** | Revenue, margin, profit, EPS, headcount — specific numbers, comparisons, rankings |
-| **When NOT to use** | Qualitative explanations (use `search_docs`), recent news (use `web_search`) |
+| **Output** | Exact scalar values or Markdown tables from `financials.csv` with absolute source citations |
+| **When to use** | Revenue, margin, net profit, EPS, headcount metrics, year-over-year comparisons |
+| **When NOT to use**| Qualitative explanations (use `search_docs`), real-time stock news (use `web_search`) |
 
-**Implementation**: Detects company names and years via keyword matching, identifies the metric from the question, filters/sorts the pandas DataFrame, and returns the result.
+* **Implementation Details**: Employs deterministic exact keyword matching to filter/sort a Pandas DataFrame. Extracts company names, years, and specific metric combinations safely.
 
-### web_search
+### 🌐 web_search
 
-| Field | Value |
+| Field | Description / Value |
 |-------|-------|
 | **Name** | `web_search` |
-| **Purpose** | Live web search for recent information |
-| **Input** | `query` (string) — short search query under 10 words |
-| **Output** | Top-3 results with URL, date, and snippet |
-| **When to use** | Current stock prices, post-April 2024 news, analyst ratings, FY25 results |
-| **When NOT to use** | Historical data in the reports (FY21-FY24), annual report content |
+| **Purpose** | Live web search for recent, post-dataset information |
+| **Input** | `query` (string) — concise SEO search query (< 10 words) |
+| **Output** | Top-3 live web results with URL, date, and relevant text snippet |
+| **When to use** | Current stock prices, post-April 2024 news, analyst ratings, FY25 current quarter results |
+| **When NOT to use**| Historical FY21-FY24 data available natively in the CSV or PDFs |
 
-**Implementation**: Calls the Tavily API with a 10-second timeout via threading. Returns formatted snippets or a clear error message on failure.
+* **Implementation Details**: Calls the Trivily Search API with strict 10-second timeout threads to prevent locking the main agent loop.
 
-## 4. Infinite Loop Prevention
+## 4. 🛑 Infinite Loop Prevention
 
-Three mechanisms prevent runaway loops:
+Three concurrent mechanisms strictly prevent runaway loops:
 
-1. **Hard cap counter**: `steps_used` is incremented for every tool call. At `steps_used >= 8`, no more tools are executed and a structured response is forced.
+1. **Hard Execution Cap**: `steps_used` evaluates on *every* tool call. At `>= 8`, execution breaks and a system prompt commands the LLM: *"Hard cap reached. Summarize what you currently have."*
+2. **Tool Feedback Loops**: If a tool raises a Python exception, it doesn't crash the script. The `Exception` returns as a payload to the LLM, signaling it shouldn't try that exact path again.
+3. **Natural Termination Signal**: The Groq API signals the loop exit automatically when it returns standard text content with an empty `tool_calls` array.
 
-2. **Tool error handling**: If a tool raises an exception, the error is returned as a string to the LLM. The LLM can then choose to answer with available data or report the failure — rather than retrying indefinitely.
+## 5. ⚠️ Known Failure Modes (Design Limitations)
 
-3. **LLM stop signal**: When the Groq API returns a response with no `tool_calls`, the loop exits immediately with the final answer.
-
-## 5. Known Failure Modes
-
-1. **Section detection is imperfect**: The chunking heuristic detects uppercase lines as section headers, but real PDFs have inconsistent formatting. Some chunks may have incorrect section labels.
-
-2. **query_data keyword matching is brittle**: The tool uses substring matching to detect metrics. A question like "What was the profit margin?" won't match "operating margin" unless both keywords appear.
-
-3. **Small model limitations**: `llama-3.1-8b-instant` occasionally fails to cite sources properly or may call the wrong tool for ambiguous questions. Larger models (70B) improve accuracy but increase latency.
+1. **Heuristic Section Detection**: The PDF chunker tags pages using a simplistic UPPERCASE regex rule to detect headers. Because Annual Reports have chaotic formatting, some text blocks receive incorrect section labels (affecting citation precision, though not search recall).
+2. **Brittle Keyword Mapping**: The `query_data` tool searches using literal substring matching. Valid human questions (e.g., *"What was the bottom-line profit?"*) miss the expected column name (`"net profit"`), triggering a false-negative "No structured data found" response.
+3. **Small-Model Routing Quirks**: Running on `llama-3.1-8b-instant` favors latency over extreme comprehension. The agent might occasionally mismatch ambiguous financial queries to `search_docs` rather than `query_data`. Scaling the requested model to a 70B variant inside `.env` immediately resolves this at the cost of slower response times.

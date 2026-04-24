@@ -9,11 +9,9 @@ load_dotenv()
 from src.agent import run_agent, write_trace
 
 queries = [
-    "What was Infosys operating margin in FY24?",
-    "What is Project Maximus and what are its five pillars?",
-    "Infosys stock price today",
-    "Should I invest in Infosys stock right now?",
-    "How did Infosys and TCS operating margins compare in FY24 and what drove each result?"
+    "How did Infosys' and TCS' operating margins compare in FY24, and what drove each?",
+    "how to make pizza dough",
+    "what is the name of the monkey in the movie 'the monkey king'?"
 ]
 
 Path("traces").mkdir(exist_ok=True)
