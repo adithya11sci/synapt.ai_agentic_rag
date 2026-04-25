@@ -161,6 +161,9 @@ synapt.ai_agentic_rag/
 ├── all_info.md           # Master compiled architecture doc
 └── test_quick.py         # Developer smoke test script
 ```
+## Demo video of the project showcasing the main features, workflow, and real-time implementation of the system.
+
+https://vimeo.com/1186557748?share=copy&fl=sv&fe=ci
 
 ## 🛠️ Tech Stack & Dependencies
 
