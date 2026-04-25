@@ -15,6 +15,22 @@ def run_eval():
         "What did the Infosys CEO say about generative AI in FY24?",
         "What was the main reason Infosys gave for revenue growth FY24?",
         "Tell me everything about Infosys Q1 FY25 results in complete detail including all segment breakdowns."
+        "What strategic priorities did Infosys highlight in FY24 MD&A?",
+        "How many new customers did Infosys add in FY24?",
+        "What is Infosys capital allocation policy?",
+        "What was Infosys operating margin in FY24?",
+        "What was Infosys revenue growth from FY21 to FY24?",
+        "Which company had the highest operating margin in FY24?",
+        "What was Infosys EPS in FY24?",
+        "How did Infosys headcount change from FY23 to FY24?",
+        "What was Wipro revenue trend over 4 years?",
+        "How did Infosys and TCS operating margins compare in FY24 and what drove each result?",
+        "What was Infosys headcount in FY24 and what does the company say about its workforce strategy?",
+        "Compare revenue growth across all 3 companies over 4 years and explain Infosys strategy for growth.",
+        "What was Infosys net profit in FY24 and what factors did management cite for it?",
+        "Should I invest in Infosys stock right now?",
+        "What was Infosys revenue in FY2015?",
+        "What is the airspeed velocity of an unladen swallow?",
     ]
 
     improved_dir = Path("traces") / "improved"
