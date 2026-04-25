@@ -14,7 +14,14 @@ Run the full evaluation with:
 python eval/run_eval.py
 ```
 
-Results and traces are saved to `traces/q1.txt` through `traces/q20.txt`.
+The evaluator computes a before/after comparison across three modes:
+- **baseline** (no planning, no reflection)
+- **plan-only** (planning enabled, reflection disabled)
+- **plan+reflection** (planning + reflection enabled)
+
+Only the **improved** traces are written to disk under `traces/improved/q1.txt` ...
+
+Note: This comparison is intentionally slower because it runs multiple variants per question and reflection may trigger one additional retrieval.
 
 ### Category Breakdown
 

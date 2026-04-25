@@ -17,6 +17,91 @@ load_dotenv()
 logger = logging.getLogger("agentic_rag.agent")
 
 
+def _safe_print(text: str, enabled: bool):
+    if enabled:
+        try:
+            print(text)
+        except Exception:
+            pass
+
+
+def _extract_json_object(text: str):
+    """Best-effort extraction of a single JSON object from free-form model text."""
+    if not text:
+        return None
+    # Fast path: whole string is JSON
+    try:
+        return json.loads(text)
+    except Exception:
+        pass
+
+    # Look for the first {...} block
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(0))
+    except Exception:
+        return None
+
+
+def _plan_for_question(question: str):
+    """Return (plan_line, tool_sequence).
+
+    The plan is intentionally deterministic and single-line so that:
+    - It reliably appears in traces/terminal output.
+    - It matches the tool sequence the agent should perform.
+    """
+    q = (question or "").strip()
+    q_lower = q.lower()
+
+    live_keywords = ["stock", "price", "right now", "today", "news", "analyst", "fy25", "q1"]
+    quant_keywords = [
+        "operating margin", "margin", "net profit", "profit", "eps", "headcount",
+        "revenue in", "revenue was", "what was infosys revenue", "how much revenue",
+        "highest", "lowest", "compare", "growth from",
+    ]
+
+    is_live = any(k in q_lower for k in live_keywords)
+    needs_explain = any(k in q_lower for k in ["why", "reason", "drove", "driver", "explain"]) or "what drove" in q_lower
+
+    # Some “how many … customers/clients/deals” facts are typically in PDFs, not in financials.csv.
+    is_customer_count = ("how many" in q_lower or "number of" in q_lower) and any(k in q_lower for k in ["customer", "customers", "client", "clients", "deal", "deals"])
+    is_quant = any(k in q_lower for k in quant_keywords)
+
+    if is_live:
+        tools = ["web_search"]
+        plan = "Plan: Use web_search to retrieve post-April 2024 live info and cite URL + date."
+        return plan, tools
+
+    if is_customer_count:
+        tools = ["search_docs"]
+        plan = "Plan: Use search_docs to retrieve the relevant passage from the FY24 annual report PDFs and cite document + page."
+        return plan, tools
+
+    # Qualitative “why/reason” questions should prefer PDFs even if they mention a financial concept like revenue.
+    if needs_explain and not is_quant:
+        tools = ["search_docs"]
+        plan = "Plan: Use search_docs to retrieve relevant passages from the FY24 annual report PDFs and cite document + page."
+        return plan, tools
+
+    if is_quant and needs_explain:
+        tools = ["query_data", "search_docs"]
+        plan = (
+            "Plan: Use query_data to pull the exact FY21–FY24 metric(s) from financials.csv, then use search_docs for management's explanation; cite sources."
+        )
+        return plan, tools
+
+    if is_quant:
+        tools = ["query_data"]
+        plan = "Plan: Use query_data to retrieve the exact metric(s) from financials.csv and cite the source."
+        return plan, tools
+
+    tools = ["search_docs"]
+    plan = "Plan: Use search_docs to retrieve relevant passages from the FY24 annual report PDFs and cite document + page."
+    return plan, tools
+
+
 def _validate_env():
     """Validate required environment variables are set."""
     if not os.environ.get("GROQ_API_KEY"):
@@ -128,14 +213,26 @@ def _call_llm(client, model, messages, tools=None, max_retries=3):
                 raise
 
 
-def run_agent(question):
-    """Orchestrates tools via an LLM agent loop. Hard cap at 8 tool calls."""
+def run_agent(question, *, enable_planning: bool = True, enable_reflection: bool = True, verbose: bool = False):
+    """Orchestrates tools via an LLM agent loop.
+
+    Bonus A: Optional planning step (emits a short plan before any tool call).
+    Bonus C: Optional reflection step (critiques final answer; may trigger one extra retrieval).
+
+    Hard cap at 8 tool calls.
+    """
     _validate_env()
 
     refusal_msg = check_refusal(question)
     if refusal_msg:
         logger.info(f"Refusal triggered for: {question[:60]}...")
-        return {"answer": refusal_msg, "steps_used": 0, "trace": [], "refused": True}
+        return {
+            "answer": refusal_msg,
+            "steps_used": 0,
+            "trace": [],
+            "events": [{"type": "refusal", "content": refusal_msg}],
+            "refused": True,
+        }
 
     client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
     model = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
@@ -249,6 +346,22 @@ def run_agent(question):
     MAX_STEPS = 8
     steps_used = 0
     trace = []
+    events = []
+
+    # ── Bonus A: Planning step (must happen before any tool is called) ──
+    plan_text = None
+    planned_tools = []
+    if enable_planning:
+        plan_text, planned_tools = _plan_for_question(question)
+        events.append({"type": "plan", "content": plan_text, "tools": planned_tools})
+        messages.append({"role": "assistant", "content": plan_text})
+        # Bias the model to follow the declared plan so traces are consistent.
+        if planned_tools:
+            messages.append({
+                "role": "system",
+                "content": f"You MUST follow the Plan exactly. Your first tool call must be: {planned_tools[0]}."
+            })
+        _safe_print(plan_text, verbose)
 
     available_functions = {
         "search_docs": search_docs,
@@ -291,6 +404,14 @@ def run_agent(question):
                 input_arg = func_args.get("query") or func_args.get("question") or str(func_args)
                 logger.info(f"Step {steps_used}: {func_name}({input_arg[:60]})")
 
+                events.append({
+                    "type": "tool_call",
+                    "step": steps_used,
+                    "tool": func_name,
+                    "input": input_arg,
+                })
+                _safe_print(f"Tool call {steps_used}/8: {func_name}({input_arg})", verbose)
+
                 if steps_used >= MAX_STEPS:
                     tool_result = "Hard cap of 8 tool calls reached. Summarize what you have and tell the user."
                     messages.append({
@@ -298,9 +419,23 @@ def run_agent(question):
                         "name": func_name, "content": tool_result
                     })
                     trace.append({"step": steps_used, "tool": func_name, "input": input_arg, "result": tool_result})
+                    events.append({
+                        "type": "tool_result",
+                        "step": steps_used,
+                        "tool": func_name,
+                        "result": tool_result,
+                    })
                     final = _call_llm(client, model, messages)
-                    return {"answer": final.choices[0].message.content, "steps_used": steps_used,
-                            "trace": trace, "refused": False, "cap_hit": True}
+                    final_answer = final.choices[0].message.content
+                    events.append({"type": "final_answer", "content": final_answer})
+                    return {
+                        "answer": final_answer,
+                        "steps_used": steps_used,
+                        "trace": trace,
+                        "events": events,
+                        "refused": False,
+                        "cap_hit": True,
+                    }
 
                 # Safe tool dispatch
                 function_to_call = available_functions.get(func_name)
@@ -319,24 +454,187 @@ def run_agent(question):
                     "name": func_name, "content": function_response
                 })
                 trace.append({"step": steps_used, "tool": func_name, "input": input_arg, "result": function_response[:500]})
+                events.append({
+                    "type": "tool_result",
+                    "step": steps_used,
+                    "tool": func_name,
+                    "result": function_response,
+                })
         else:
-            return {"answer": msg.content, "steps_used": steps_used, "trace": trace, "refused": False}
+            final_answer = (msg.content or "").strip()
+            if not final_answer:
+                # If the model returned an empty message, force a single retry for a usable answer.
+                retry_instruction = (
+                    "Your previous message was empty. Provide a helpful final answer now. "
+                    "If the question is out-of-domain for a financial research agent focused on Infosys/TCS/Wipro, "
+                    "politely refuse and say 'No tools were called.'"
+                )
+                retry = _call_llm(client, model, messages + [{"role": "system", "content": retry_instruction}], tools=None)
+                final_answer = (retry.choices[0].message.content or "").strip()
+            if not final_answer:
+                final_answer = "I’m unable to provide an answer right now. No tools were called."
 
-    return {"answer": "Failed to complete within step limit.", "steps_used": steps_used,
-            "trace": trace, "refused": False, "cap_hit": True}
+            events.append({"type": "draft_answer", "content": final_answer})
+
+            # ── Bonus C: Reflection step (may trigger one extra retrieval round) ──
+            if enable_reflection and final_answer:
+                messages.append({"role": "assistant", "content": final_answer})
+
+                reflection_instruction = (
+                    "REFLECTION STEP: Critique the draft answer with two checks: "
+                    "(1) Does it actually answer the user question? "
+                    "(2) Is every claim cited with (doc+page) or (financials.csv) or (URL+date)? "
+                    "If either check fails, propose ONE additional retrieval action (at most one tool call) "
+                    "that would most improve correctness/citations. "
+                    "Return ONLY a JSON object with keys: needs_retrieval (bool), critique (string), "
+                    "suggested_tool (one of search_docs|query_data|web_search|null), suggested_query (string|null)."
+                )
+
+                refl_resp = _call_llm(client, model, messages + [{"role": "system", "content": reflection_instruction}], tools=None)
+                refl_text = (refl_resp.choices[0].message.content or "").strip()
+                events.append({"type": "reflection_raw", "content": refl_text})
+
+                refl = _extract_json_object(refl_text)
+                # Heuristic fallback if the model did not return valid JSON
+                if not isinstance(refl, dict):
+                    has_any_citation = any(kw in final_answer for kw in ["Source:", "Page:", "URL:", "financials.csv", ".pdf", "http"])
+                    needs = not has_any_citation
+                    critique = "Model did not return JSON reflection; using heuristic citation check."
+
+                    q_lower = question.lower()
+                    if any(kw in q_lower for kw in ["revenue", "eps", "operating margin", "net profit", "headcount", "highest", "lowest", "compare", "growth", "fy21", "fy22", "fy23", "fy24"]):
+                        suggested_tool = "query_data"
+                        suggested_query = question
+                    elif any(kw in q_lower for kw in ["stock", "price", "right now", "today", "fy25", "q1", "news", "analyst"]):
+                        suggested_tool = "web_search"
+                        suggested_query = " ".join(question.split()[:10])
+                    else:
+                        suggested_tool = "search_docs"
+                        suggested_query = question
+                else:
+                    needs = bool(refl.get("needs_retrieval"))
+                    critique = (refl.get("critique") or "").strip()
+                    suggested_tool = refl.get("suggested_tool")
+                    suggested_query = refl.get("suggested_query")
+
+                reflection_summary = f"Reflection: needs_retrieval={needs}; critique={critique}"
+                reflection_status = "OK" if not needs else "Needs retrieval"
+                events.append({
+                    "type": "reflection",
+                    "content": f"Reflection: {reflection_status}",
+                    "needs_retrieval": needs,
+                    "critique": critique,
+                    "suggested_tool": suggested_tool,
+                    "suggested_query": suggested_query,
+                })
+                _safe_print(f"Reflection: {reflection_status}", verbose)
+
+                can_retrieve = needs and steps_used < MAX_STEPS and suggested_tool in available_functions and isinstance(suggested_query, str) and suggested_query.strip()
+                if can_retrieve:
+                    # Execute exactly one additional tool call
+                    steps_used += 1
+                    tool_name = suggested_tool
+                    tool_query = suggested_query.strip()
+                    events.append({"type": "tool_call", "step": steps_used, "tool": tool_name, "input": tool_query, "from": "reflection"})
+                    _safe_print(f"Tool call {steps_used}/8 (reflection): {tool_name}({tool_query})", verbose)
+
+                    if tool_name == "query_data":
+                        args = {"question": tool_query}
+                    else:
+                        args = {"query": tool_query}
+
+                    try:
+                        function_response = available_functions[tool_name](**args)
+                    except Exception as e:
+                        function_response = f"Error executing {tool_name}: {str(e)}"
+
+                    # Append synthetic tool message (no tool_call_id available here)
+                    messages.append({"role": "tool", "tool_call_id": f"reflection_{steps_used}", "name": tool_name, "content": function_response})
+                    trace.append({"step": steps_used, "tool": tool_name, "input": tool_query, "result": str(function_response)[:500]})
+                    events.append({"type": "tool_result", "step": steps_used, "tool": tool_name, "result": function_response})
+
+                    revise_instruction = (
+                        "Revise the answer using the latest tool output. "
+                        "Do NOT call any more tools. "
+                        "Ensure the final answer fully addresses the question and adds citations for all claims."
+                    )
+                    revised = _call_llm(client, model, messages + [{"role": "system", "content": revise_instruction}], tools=None)
+                    revised_answer = revised.choices[0].message.content
+                    events.append({"type": "final_answer", "content": revised_answer, "revised": True})
+                    return {
+                        "answer": revised_answer,
+                        "draft_answer": final_answer,
+                        "steps_used": steps_used,
+                        "trace": trace,
+                        "events": events,
+                        "refused": False,
+                    }
+
+            events.append({"type": "final_answer", "content": final_answer, "revised": False})
+            return {
+                "answer": final_answer,
+                "steps_used": steps_used,
+                "trace": trace,
+                "events": events,
+                "refused": False,
+            }
+
+    return {
+        "answer": "Failed to complete within step limit.",
+        "steps_used": steps_used,
+        "trace": trace,
+        "events": events,
+        "refused": False,
+        "cap_hit": True,
+    }
 
 
 def write_trace(question, result, filepath):
     """Write a human-readable trace file for a single agent run."""
-    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    out_dir = os.path.dirname(filepath)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(f"Question: {question}\n")
+        if result.get("eval_summary"):
+            es = result["eval_summary"]
+            f.write(
+                "Eval Summary: "
+                f"baseline={es.get('baseline')} | "
+                f"plan_only={es.get('plan_only')} | "
+                f"plan_plus_reflection={es.get('plan_plus_reflection')}\n"
+            )
+
+        plan_line = None
+        reflection_line = None
+        if result.get("events"):
+            for ev in result["events"]:
+                if ev.get("type") == "plan":
+                    plan_line = ev.get("content")
+                if ev.get("type") == "reflection":
+                    reflection_line = ev.get("content")
+
+        if plan_line:
+            f.write(f"{plan_line}\n")
+        if reflection_line:
+            f.write(f"{reflection_line}\n")
+
         f.write(f"Answer: {result['answer']}\n")
+        if result.get("draft_answer"):
+            f.write(f"Draft Answer (pre-reflection): {result['draft_answer']}\n")
         f.write(f"Steps used: {result['steps_used']} / 8\n")
         if result.get("refused"):
             f.write("Status: REFUSED (no tools called)\n")
         if result.get("cap_hit"):
             f.write("Status: CAP HIT (8 tool calls reached)\n")
+
+        # Events block
+        f.write("\n--- Events ---\n")
+        if plan_line:
+            f.write(f"plan: {plan_line.replace('Plan:', '').strip()}\n")
+        if reflection_line:
+            f.write(f"reflection: {reflection_line.replace('Reflection:', '').strip()}\n")
+
         f.write("\n--- Trace ---\n")
         for t in result['trace']:
             f.write(f"Step {t['step']}: tool={t['tool']}  input='{t['input']}'\n")
@@ -345,7 +643,7 @@ def write_trace(question, result, filepath):
 
 if __name__ == "__main__":
     q = sys.argv[1]
-    res = run_agent(q)
+    res = run_agent(q, enable_planning=True, enable_reflection=True, verbose=True)
     print(res["answer"])
     print(f"Steps used: {res['steps_used']} / 8")
     write_trace(q, res, "traces/trace.txt")

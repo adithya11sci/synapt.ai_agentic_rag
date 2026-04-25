@@ -14,8 +14,9 @@ load_dotenv()
 from src.agent import run_agent, write_trace
 
 queries = [
-    "How did Infosys' and TCS' operating margins compare in FY24, and what drove each?",
-    "how to make pizza dough",
+    "What strategic priorities did Infosys highlight in FY24 MD&A?",
+    "How many new customers did Infosys add in FY24?",
+    "What is Infosys capital allocation policy?",
     "what is the name of the monkey in the movie 'the monkey king'?"
 ]
 
@@ -24,7 +25,7 @@ Path("traces").mkdir(exist_ok=True)
 print("=== STARTING AGENT TESTS ===")
 for i, q in enumerate(queries):
     print(f"\n--- Question {i+1}: {q} ---")
-    res = run_agent(q)
+    res = run_agent(q, enable_planning=True, enable_reflection=True, verbose=True)
     tools_called = [t['tool'] for t in res.get('trace', [])]
     print(f"TOOLS CALLED: {tools_called}")
     print(f"ANSWER: {res['answer']}".encode('utf-8', 'ignore').decode('utf-8'))

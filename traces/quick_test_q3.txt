@@ -1,5 +1,18 @@
-Question: what is the name of the monkey in the movie 'the monkey king'?
-Answer: I'm a financial research agent focused on Infosys, TCS, and Wipro, and I don't have information about movies or non-financial topics. I can only provide information related to the financial performance, strategies, and initiatives of these companies. If you have any questions related to Infosys, TCS, or Wipro, I'll be happy to help.
-Steps used: 0 / 8
+Question: What is Infosys capital allocation policy?
+Plan: Use search_docs to retrieve relevant passages from the FY24 annual report PDFs and cite document + page.
+Reflection: OK
+Answer: Answer: Infosys capital allocation policy is to return approximately 85% of the free cash flow cumulatively over a five-year period through a combination of semi-annual dividends, share buyback, and other measures (Source: infosys_fy24.pdf, Page 32).
+Citations: search_docs → infosys_fy24.pdf → Page 32
+Steps used: 1 / 8
+Steps used: 1 / 8
+
+--- Events ---
+plan: Use search_docs to retrieve relevant passages from the FY24 annual report PDFs and cite document + page.
+reflection: OK
 
 --- Trace ---
+Step 1: tool=search_docs  input='Infosys capital allocation policy'
+             result=[1] Source: infosys_fy24.pdf | Page: 32 | Section: STATUTORY REPORTS
+    Section: STATUTORY REPORTS Infosys Integrated Annual Report 2023-24 59 Capital Allocation Policy Effective from financial year 2025, the Company expects to continue its policy of returning approximately 85% of the free cash flow cumulatively over a five-year period through a combination of semi-annu...
+[2] Source: infosys_fy24.pdf | Page: 227 | Section: BN-SP-MET – – – – –
+    Section: BN-SP-MET – – – – – Infosys Integrated

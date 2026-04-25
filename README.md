@@ -23,6 +23,17 @@ The agent implements a complete reasoning loop from scratch: **query rewrite / g
 - **♾️ Infinite Loop Protection:** A hard cap of 8 tool calls prevents runaway API usage and forces summarization.
 - **🔍 Full Traceability (Bonus)**: Every tool invocation, latency metric (in seconds), and LLM reasoning step is logged locally to `traces/` for developer auditing.
 
+## ✅ Implemented: Planning + Reflection (Bonuses)
+
+- **Bonus A — Planning step**: The agent emits a short, single-line `Plan:` *before* any tool call. This plan is shown in the terminal output and written into trace files.
+- **Bonus C — Reflection step**: After drafting an answer, the agent emits `Reflection: OK` (or `Reflection: Needs retrieval`). If needed, it performs **one additional retrieval** and revises the answer.
+
+### ⏱️ Why runs can take longer now
+
+- Enabling planning/reflection adds extra LLM calls.
+- `search_docs` is slow on the *first* call because it loads the embedding model + FAISS index.
+- The evaluation script may run multiple variants per question (baseline vs plan-only vs plan+reflection), which multiplies runtime.
+
 ## ⚡ Quick Start
 
 ### 1. Clone & Install
