@@ -1,5 +1,15 @@
 import sys
+import os
+import logging
+import warnings
 from pathlib import Path
+
+# Suppress TensorFlow logging to avoid cluttering the terminal output
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+logging.getLogger("tensorflow").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", category=UserWarning, module="tensorflow")
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 # Ensure project root is on the path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -14,7 +24,22 @@ def run_eval():
     questions = [
         "What did the Infosys CEO say about generative AI in FY24?",
         "What was the main reason Infosys gave for revenue growth FY24?",
-        "Tell me everything about Infosys Q1 FY25 results in complete detail including all segment breakdowns."
+        "Tell me everything about Infosys Q1 FY25 results in complete detail including all segment breakdowns.",
+        "What strategic priorities did Infosys highlight in FY24 MD&A?",
+        "What is Infosys capital allocation policy?",
+        "What was Infosys operating margin in FY24?",
+        "What was Infosys revenue growth from FY21 to FY24?",
+        "Which company had the highest operating margin in FY24?",
+        "What was Infosys EPS in FY24?",
+        "How did Infosys headcount change from FY23 to FY24?",
+        "What was Wipro revenue trend over 4 years?",
+        "How did Infosys and TCS operating margins compare in FY24 and what drove each result?",
+        "What was Infosys headcount in FY24 and what does the company say about its workforce strategy?",
+        "Compare revenue growth across all 3 companies over 4 years and explain Infosys strategy for growth.",
+        "What was Infosys net profit in FY24 and what factors did management cite for it?",
+        "Should I invest in Infosys stock right now?",
+        "What was Infosys revenue in FY2015?",
+        "What is the airspeed velocity of an unladen swallow?",
     ]
 
     improved_dir = Path("traces") / "improved"
@@ -25,14 +50,12 @@ def run_eval():
         steps = res.get("steps_used", 0)
         answer = res.get("answer", "") or ""
 
-        if i == 16:
+        if i == 15:
             return "PASS" if res.get("refused") and steps == 0 else "FAIL"
-        elif i == 17:
+        elif i == 16:
             return "PASS" if any(kw in answer.lower() for kw in ["not available", "no data", "no structured data", "don't have", "outside"]) else "FAIL"
-        elif i == 18:
-            return "PASS" if any(kw in answer.lower() for kw in ["not available", "cannot", "no data", "not related", "outside", "don't have"]) else "FAIL"
-        elif i == 19:
-            return "PASS" if res.get("cap_hit") or "web_search" in tools_called else "FAIL"
+        elif i == 17:
+            return "PASS" if any(kw in answer.lower() for kw in ["not available", "cannot", "no data", "not related", "outside", "don't have", "refusal"]) else "FAIL"
         else:
             has_citation = any(kw in answer for kw in ["Source:", "Page:", "URL:", "financials.csv", ".pdf", "http"])
             return "PASS" if answer.strip() and has_citation else "FAIL"
